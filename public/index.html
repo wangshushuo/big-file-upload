@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Upload</title>
+  </head>
+  <body>
+    <input type="file" id="fileInput" />
+    <button onclick="uploadFile()">Upload</button>
+    <button onclick="md5File()">md5</button>
+    <div id="progress"></div>
+    <div id="result"></div>
+    <textarea name="" id=""></textarea>
+    <script src="https://cdn.jsdelivr.net/npm/spark-md5@3.0.0/spark-md5.min.js"></script>
+    <script>
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+
+      async function uploadFile() {
+        const file = document.getElementById("fileInput").files[0];
+        if (!file) return;
+        await upload(file);
+      }
+
+      async function md5File() {
+        const file = document.getElementById("fileInput").files[0];
+        if (!file) return;
+        await md5(file);
+        // syncMd5(file);
+      }
+
+      function md5(file) {
+        const chunks = Math.ceil(file.size / CHUNK_SIZE);
+        let currentChunk = 0;
+        const spark = new SparkMD5.ArrayBuffer();
+        const fileReader = new FileReader();
+
+        fileReader.onload = function (e) {
+          spark.append(e.target.result);
+          currentChunk++;
+
+          document.getElementById(
+            "progress"
+          ).innerText = `Progress: ${Math.round(
+            (currentChunk / chunks) * 100
+          )}%`;
+
+          if (currentChunk < chunks) {
+            requestIdleCallback(readNextChunk);
+          } else {
+            const md5 = spark.end();
+            document.getElementById("result").textContent = `MD5: ${md5}`;
+          }
+        };
+
+        fileReader.onerror = function () {
+          alert("Error reading file");
+        };
+
+        function readNextChunk() {
+          const start = currentChunk * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const blob = file.slice(start, end);
+          fileReader.readAsArrayBuffer(blob);
+        }
+
+        requestIdleCallback(readNextChunk);
+      }
+
+      async function upload(file) {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        let uploadedChunks = 0;
+
+        for (let start = 0; start < file.size; start += CHUNK_SIZE) {
+          const chunk = file.slice(start, start + CHUNK_SIZE);
+          const formData = new FormData();
+          formData.append("file", chunk);
+          formData.append("fileName", file.name);
+          formData.append("chunkIndex", Math.floor(start / CHUNK_SIZE));
+          formData.append("totalChunks", totalChunks);
+
+          await fetch("/upload", {
+            method: "POST",
+            body: formData,
+          });
+
+          uploadedChunks++;
+          document.getElementById(
+            "progress"
+          ).innerText = `Progress: ${Math.round(
+            (uploadedChunks / totalChunks) * 100
+          )}%`;
+        }
+
+        await fetch("/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            totalChunks: totalChunks,
+          }),
+        });
+
+        alert("Upload complete!");
+      }
+
+      function syncMd5(file) {
+        if (file) {
+          console.log(file);
+          const reader = new FileReader();
+
+          reader.onload = function (e) {
+            const arrayBuffer = e.target.result;
+            const spark = new SparkMD5.ArrayBuffer();
+            let offset = 0;
+
+            while (offset < arrayBuffer.byteLength) {
+              const chunk = arrayBuffer.slice(offset, offset + CHUNK_SIZE);
+              spark.append(chunk);
+              offset += CHUNK_SIZE;
+              console.log(offset, (offset / arrayBuffer.byteLength) * 100);
+              document.getElementById(
+                "progress"
+              ).innerText = `Progress: ${Math.round(
+                (offset / arrayBuffer.byteLength) * 100
+              )}%`;
+            }
+
+            const md5 = spark.end();
+            document.getElementById("result").textContent = "MD5: " + md5;
+          };
+
+          reader.readAsArrayBuffer(file);
+        } else {
+          alert("Please select a file first.");
+        }
+      }
+    </script>
+  </body>
+</html>
